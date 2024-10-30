@@ -225,6 +225,7 @@ impl ShaderCache {
     fn get(
         &mut self,
         render_device: &RenderDevice,
+        render_adapter: &RenderAdapter,
         pipeline: CachedPipelineId,
         id: AssetId<Shader>,
         shader_defs: &[ShaderDefVal],
@@ -259,6 +260,10 @@ impl ShaderCache {
                     shader_defs.push("NO_ARRAY_TEXTURES_SUPPORT".into());
                     shader_defs.push("NO_CUBE_ARRAY_TEXTURES_SUPPORT".into());
                     shader_defs.push("SIXTEEN_BYTE_ALIGNMENT".into());
+                }
+
+                if !render_adapter.get_downlevel_capabilities().flags.contains(DownlevelFlags::CUBE_ARRAY_TEXTURES) {
+                    shader_defs.push("NO_CUBE_ARRAY_TEXTURES_SUPPORT".into());
                 }
 
                 if cfg!(feature = "ios_simulator") {
@@ -460,6 +465,7 @@ pub struct PipelineCache {
     layout_cache: Arc<Mutex<LayoutCache>>,
     shader_cache: Arc<Mutex<ShaderCache>>,
     device: RenderDevice,
+    render_adapter: RenderAdapter,
     pipelines: Vec<CachedPipeline>,
     waiting_pipelines: HashSet<CachedPipelineId>,
     new_pipelines: Mutex<Vec<CachedPipeline>>,
@@ -488,6 +494,7 @@ impl PipelineCache {
         Self {
             shader_cache: Arc::new(Mutex::new(ShaderCache::new(&device, &render_adapter))),
             device,
+            render_adapter,
             layout_cache: default(),
             waiting_pipelines: default(),
             new_pipelines: default(),
@@ -674,6 +681,7 @@ impl PipelineCache {
         descriptor: RenderPipelineDescriptor,
     ) -> CachedPipelineState {
         let device = self.device.clone();
+        let render_adapter = self.render_adapter.clone();
         let shader_cache = self.shader_cache.clone();
         let layout_cache = self.layout_cache.clone();
         create_pipeline_task(
@@ -683,6 +691,7 @@ impl PipelineCache {
 
                 let vertex_module = match shader_cache.get(
                     &device,
+                    &render_adapter,
                     id,
                     descriptor.vertex.shader.id(),
                     &descriptor.vertex.shader_defs,
@@ -695,6 +704,7 @@ impl PipelineCache {
                     Some(fragment) => {
                         match shader_cache.get(
                             &device,
+                            &render_adapter,
                             id,
                             fragment.shader.id(),
                             &fragment.shader_defs,
@@ -783,6 +793,7 @@ impl PipelineCache {
         descriptor: ComputePipelineDescriptor,
     ) -> CachedPipelineState {
         let device = self.device.clone();
+        let render_adapter = self.render_adapter.clone();
         let shader_cache = self.shader_cache.clone();
         let layout_cache = self.layout_cache.clone();
         create_pipeline_task(
@@ -792,6 +803,7 @@ impl PipelineCache {
 
                 let compute_module = match shader_cache.get(
                     &device,
+                    &render_adapter,
                     id,
                     descriptor.shader.id(),
                     &descriptor.shader_defs,
