@@ -36,6 +36,12 @@ use bevy_render::renderer::RenderAdapter;
 #[cfg(debug_assertions)]
 use bevy_utils::warn_once;
 use environment_map::EnvironmentMapLight;
+#[cfg(any(
+    not(feature = "webgl"),
+    not(target_arch = "wasm32"),
+    feature = "webgpu"
+))]
+use bevy_render::DownlevelFlags;
 
 #[cfg(debug_assertions)]
 use crate::MESH_PIPELINE_VIEW_LAYOUT_SAFE_MAX_TEXTURES;
@@ -197,6 +203,19 @@ fn layout_entries(
     render_device: &RenderDevice,
     render_adapter: &RenderAdapter,
 ) -> Vec<BindGroupLayoutEntry> {
+    #[cfg(all(feature = "webgl", target_arch = "wasm32", not(feature = "webgpu")))]
+    let supports_cube_array_textures = false;
+
+    #[cfg(any(
+        not(feature = "webgl"),
+        not(target_arch = "wasm32"),
+        feature = "webgpu"
+    ))]
+    let supports_cube_array_textures = render_adapter
+        .get_downlevel_capabilities()
+        .flags
+        .contains(DownlevelFlags::CUBE_ARRAY_TEXTURES);
+
     let mut entries = DynamicBindGroupLayoutEntries::new_with_indices(
         ShaderStages::FRAGMENT,
         (
@@ -210,20 +229,11 @@ fn layout_entries(
             // Point Shadow Texture Cube Array
             (
                 2,
-                #[cfg(all(
-                    not(feature = "ios_simulator"),
-                    any(
-                        not(feature = "webgl"),
-                        not(target_arch = "wasm32"),
-                        feature = "webgpu"
-                    )
-                ))]
-                texture_cube_array(TextureSampleType::Depth),
-                #[cfg(any(
-                    feature = "ios_simulator",
-                    all(feature = "webgl", target_arch = "wasm32", not(feature = "webgpu"))
-                ))]
-                texture_cube(TextureSampleType::Depth),
+                if supports_cube_array_textures {
+                    texture_cube_array(TextureSampleType::Depth)
+                } else {
+                    texture_cube(TextureSampleType::Depth)
+                },
             ),
             // Point Shadow Texture Array Comparison Sampler
             (3, sampler(SamplerBindingType::Comparison)),

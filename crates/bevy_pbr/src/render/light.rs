@@ -9,6 +9,7 @@ use bevy_ecs::{
     system::lifetimeless::Read,
 };
 use bevy_math::{ops, Mat4, UVec4, Vec2, Vec3, Vec3Swizzles, Vec4, Vec4Swizzles};
+use bevy_render::mesh::Mesh;
 use bevy_render::camera::SortedCameras;
 use bevy_render::sync_world::{MainEntity, RenderEntity, TemporaryRenderEntity};
 use bevy_render::{
@@ -25,6 +26,12 @@ use bevy_render::{
     Extract,
 };
 use bevy_transform::{components::GlobalTransform, prelude::Transform};
+#[cfg(any(
+    not(feature = "webgl"),
+    not(target_arch = "wasm32"),
+    feature = "webgpu"
+))]
+use bevy_render::{renderer::RenderAdapter, DownlevelFlags};
 #[cfg(feature = "trace")]
 use bevy_utils::tracing::info_span;
 use bevy_utils::{
@@ -667,12 +674,24 @@ pub(crate) fn spot_light_clip_from_view(angle: f32, near_z: f32) -> Mat4 {
     Mat4::perspective_infinite_reverse_rh(angle * 2.0, 1.0, near_z)
 }
 
+#[derive(Default)]
+pub struct PrepareLightsWarningEmitted {
+    max_directional_lights: bool,
+    max_cascades_per_light: bool,
+}
+
 #[allow(clippy::too_many_arguments)]
 pub fn prepare_lights(
     mut commands: Commands,
     mut texture_cache: ResMut<TextureCache>,
     render_device: Res<RenderDevice>,
     render_queue: Res<RenderQueue>,
+    #[cfg(any(
+        not(feature = "webgl"),
+        not(target_arch = "wasm32"),
+        feature = "webgpu"
+    ))]
+    render_adapter: Res<RenderAdapter>,
     mut global_light_meta: ResMut<GlobalClusterableObjectMeta>,
     mut light_meta: ResMut<LightMeta>,
     views: Query<
@@ -693,6 +712,7 @@ pub fn prepare_lights(
         mut max_cascades_per_light_warning_emitted,
         mut live_shadow_mapping_lights,
     ): (Local<bool>, Local<bool>, Local<EntityHashSet>),
+    mut warning_emitted: Local<PrepareLightsWarningEmitted>,
     point_lights: Query<(
         Entity,
         &ExtractedPointLight,
@@ -740,17 +760,17 @@ pub fn prepare_lights(
     #[cfg(all(feature = "webgl", target_arch = "wasm32", not(feature = "webgpu")))]
     let max_texture_cubes = 1;
 
-    if !*max_directional_lights_warning_emitted && directional_lights.len() > MAX_DIRECTIONAL_LIGHTS
+    if !*warning_emitted.max_directional_lights && directional_lights.len() > MAX_DIRECTIONAL_LIGHTS
     {
         warn!(
             "The amount of directional lights of {} is exceeding the supported limit of {}.",
             directional_lights.len(),
             MAX_DIRECTIONAL_LIGHTS
         );
-        *max_directional_lights_warning_emitted = true;
+        *warning_emitted.max_directional_lights = true;
     }
 
-    if !*max_cascades_per_light_warning_emitted
+    if !*warning_emitted.max_cascades_per_light
         && directional_lights
             .iter()
             .any(|(_, light)| light.cascade_shadow_config.bounds.len() > MAX_CASCADES_PER_LIGHT)
@@ -759,7 +779,7 @@ pub fn prepare_lights(
             "The number of cascades configured for a directional light exceeds the supported limit of {}.",
             MAX_CASCADES_PER_LIGHT
         );
-        *max_cascades_per_light_warning_emitted = true;
+        *warning_emitted.max_cascades_per_light = true;
     }
 
     let point_light_count = point_lights
@@ -1017,34 +1037,37 @@ pub fn prepare_lights(
         },
     );
 
-    let point_light_depth_texture_view =
-        point_light_depth_texture
-            .texture
-            .create_view(&TextureViewDescriptor {
-                label: Some("point_light_shadow_map_array_texture_view"),
-                format: None,
-                // NOTE: iOS Simulator is missing CubeArray support so we use Cube instead.
-                // See https://github.com/bevyengine/bevy/pull/12052 - remove if support is added.
-                #[cfg(all(
-                    not(feature = "ios_simulator"),
-                    any(
-                        not(feature = "webgl"),
-                        not(target_arch = "wasm32"),
-                        feature = "webgpu"
-                    )
-                ))]
-                dimension: Some(TextureViewDimension::CubeArray),
-                #[cfg(any(
-                    feature = "ios_simulator",
-                    all(feature = "webgl", target_arch = "wasm32", not(feature = "webgpu"))
-                ))]
-                dimension: Some(TextureViewDimension::Cube),
-                aspect: TextureAspect::DepthOnly,
-                base_mip_level: 0,
-                mip_level_count: None,
-                base_array_layer: 0,
-                array_layer_count: None,
-            });
+    #[cfg(all(feature = "webgl", target_arch = "wasm32", not(feature = "webgpu")))]
+    let supports_cube_array_textures = false;
+
+    #[cfg(any(
+        not(feature = "webgl"),
+        not(target_arch = "wasm32"),
+        feature = "webgpu"
+    ))]
+    let supports_cube_array_textures = render_adapter
+        .get_downlevel_capabilities()
+        .flags
+        .contains(DownlevelFlags::CUBE_ARRAY_TEXTURES);
+
+    let point_light_texture_descriptor = &TextureViewDescriptor {
+        label: Some("point_light_shadow_map_array_texture_view"),
+        format: None,
+        dimension: if supports_cube_array_textures {
+            Some(TextureViewDimension::CubeArray)
+        } else {
+            Some(TextureViewDimension::Cube)
+        },
+        aspect: TextureAspect::DepthOnly,
+        base_mip_level: 0,
+        mip_level_count: None,
+        base_array_layer: 0,
+        array_layer_count: None,
+    };
+
+    let point_light_depth_texture_view = point_light_depth_texture
+        .texture
+        .create_view(point_light_texture_descriptor);
 
     let directional_light_depth_texture = texture_cache.get(
         &render_device,
