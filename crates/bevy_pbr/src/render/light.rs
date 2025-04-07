@@ -9,7 +9,6 @@ use bevy_ecs::{
     system::lifetimeless::Read,
 };
 use bevy_math::{ops, Mat4, UVec4, Vec2, Vec3, Vec3Swizzles, Vec4, Vec4Swizzles};
-use bevy_render::mesh::Mesh;
 use bevy_render::camera::SortedCameras;
 use bevy_render::sync_world::{MainEntity, RenderEntity, TemporaryRenderEntity};
 use bevy_render::{
@@ -760,17 +759,17 @@ pub fn prepare_lights(
     #[cfg(all(feature = "webgl", target_arch = "wasm32", not(feature = "webgpu")))]
     let max_texture_cubes = 1;
 
-    if !*warning_emitted.max_directional_lights && directional_lights.len() > MAX_DIRECTIONAL_LIGHTS
+    if !warning_emitted.max_directional_lights && directional_lights.len() > MAX_DIRECTIONAL_LIGHTS
     {
         warn!(
             "The amount of directional lights of {} is exceeding the supported limit of {}.",
             directional_lights.len(),
             MAX_DIRECTIONAL_LIGHTS
         );
-        *warning_emitted.max_directional_lights = true;
+        warning_emitted.max_directional_lights = true;
     }
 
-    if !*warning_emitted.max_cascades_per_light
+    if !warning_emitted.max_cascades_per_light
         && directional_lights
             .iter()
             .any(|(_, light)| light.cascade_shadow_config.bounds.len() > MAX_CASCADES_PER_LIGHT)
@@ -779,7 +778,7 @@ pub fn prepare_lights(
             "The number of cascades configured for a directional light exceeds the supported limit of {}.",
             MAX_CASCADES_PER_LIGHT
         );
-        *warning_emitted.max_cascades_per_light = true;
+        warning_emitted.max_cascades_per_light = true;
     }
 
     let point_light_count = point_lights
