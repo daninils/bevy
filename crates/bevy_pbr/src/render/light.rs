@@ -673,18 +673,11 @@ pub(crate) fn spot_light_clip_from_view(angle: f32, near_z: f32) -> Mat4 {
     Mat4::perspective_infinite_reverse_rh(angle * 2.0, 1.0, near_z)
 }
 
-#[derive(Default)]
-pub struct PrepareLightsWarningEmitted {
-    max_directional_lights: bool,
-    max_cascades_per_light: bool,
-}
-
 #[allow(clippy::too_many_arguments)]
 pub fn prepare_lights(
     mut commands: Commands,
     mut texture_cache: ResMut<TextureCache>,
-    render_device: Res<RenderDevice>,
-    render_queue: Res<RenderQueue>,
+    (render_device, render_queue): (Res<RenderDevice>, Res<RenderQueue>),
     #[cfg(any(
         not(feature = "webgl"),
         not(target_arch = "wasm32"),
@@ -711,7 +704,6 @@ pub fn prepare_lights(
         mut max_cascades_per_light_warning_emitted,
         mut live_shadow_mapping_lights,
     ): (Local<bool>, Local<bool>, Local<EntityHashSet>),
-    mut warning_emitted: Local<PrepareLightsWarningEmitted>,
     point_lights: Query<(
         Entity,
         &ExtractedPointLight,
@@ -759,17 +751,17 @@ pub fn prepare_lights(
     #[cfg(all(feature = "webgl", target_arch = "wasm32", not(feature = "webgpu")))]
     let max_texture_cubes = 1;
 
-    if !warning_emitted.max_directional_lights && directional_lights.len() > MAX_DIRECTIONAL_LIGHTS
+    if !*max_directional_lights_warning_emitted && directional_lights.len() > MAX_DIRECTIONAL_LIGHTS
     {
         warn!(
             "The amount of directional lights of {} is exceeding the supported limit of {}.",
             directional_lights.len(),
             MAX_DIRECTIONAL_LIGHTS
         );
-        warning_emitted.max_directional_lights = true;
+        *max_directional_lights_warning_emitted = true;
     }
 
-    if !warning_emitted.max_cascades_per_light
+    if !*max_cascades_per_light_warning_emitted
         && directional_lights
             .iter()
             .any(|(_, light)| light.cascade_shadow_config.bounds.len() > MAX_CASCADES_PER_LIGHT)
@@ -778,7 +770,7 @@ pub fn prepare_lights(
             "The number of cascades configured for a directional light exceeds the supported limit of {}.",
             MAX_CASCADES_PER_LIGHT
         );
-        warning_emitted.max_cascades_per_light = true;
+        *max_cascades_per_light_warning_emitted = true;
     }
 
     let point_light_count = point_lights
