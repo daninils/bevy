@@ -745,9 +745,7 @@ pub fn prepare_lights(
         ),
         With<Camera3d>,
     >,
-    ambient_light: Res<AmbientLight>,
-    point_light_shadow_map: Res<PointLightShadowMap>,
-    directional_light_shadow_map: Res<DirectionalLightShadowMap>,
+    (ambient_light, point_light_shadow_map, directional_light_shadow_map): (Res<AmbientLight>, Res<PointLightShadowMap>, Res<DirectionalLightShadowMap>),
     mut shadow_render_phases: ResMut<ViewBinnedRenderPhases<Shadow>>,
     (
         mut max_directional_lights_warning_emitted,
