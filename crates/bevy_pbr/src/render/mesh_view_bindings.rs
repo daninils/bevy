@@ -31,6 +31,12 @@ use bevy_render::{
 };
 use core::{array, num::NonZero};
 use environment_map::EnvironmentMapLight;
+#[cfg(any(
+    not(feature = "webgl"),
+    not(target_arch = "wasm32"),
+    feature = "webgpu"
+))]
+use bevy_render::DownlevelFlags;
 
 use crate::{
     decal::{
@@ -202,6 +208,19 @@ fn layout_entries(
     render_device: &RenderDevice,
     render_adapter: &RenderAdapter,
 ) -> Vec<BindGroupLayoutEntry> {
+    #[cfg(all(feature = "webgl", target_arch = "wasm32", not(feature = "webgpu")))]
+    let supports_cube_array_textures = false;
+
+    #[cfg(any(
+        not(feature = "webgl"),
+        not(target_arch = "wasm32"),
+        feature = "webgpu"
+    ))]
+    let supports_cube_array_textures = render_adapter
+        .get_downlevel_capabilities()
+        .flags
+        .contains(DownlevelFlags::CUBE_ARRAY_TEXTURES);
+
     let mut entries = DynamicBindGroupLayoutEntries::new_with_indices(
         ShaderStages::FRAGMENT,
         (
@@ -215,20 +234,11 @@ fn layout_entries(
             // Point Shadow Texture Cube Array
             (
                 2,
-                #[cfg(all(
-                    not(target_abi = "sim"),
-                    any(
-                        not(feature = "webgl"),
-                        not(target_arch = "wasm32"),
-                        feature = "webgpu"
-                    )
-                ))]
-                texture_cube_array(TextureSampleType::Depth),
-                #[cfg(any(
-                    target_abi = "sim",
-                    all(feature = "webgl", target_arch = "wasm32", not(feature = "webgpu"))
-                ))]
-                texture_cube(TextureSampleType::Depth),
+                if supports_cube_array_textures {
+                    texture_cube_array(TextureSampleType::Depth)
+                } else {
+                    texture_cube(TextureSampleType::Depth)
+                },
             ),
             // Point Shadow Texture Array Comparison Sampler
             (3, sampler(SamplerBindingType::Comparison)),

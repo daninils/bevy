@@ -43,6 +43,12 @@ use bevy_render::{
     sync_world::{MainEntity, RenderEntity},
 };
 use bevy_transform::{components::GlobalTransform, prelude::Transform};
+#[cfg(any(
+    not(feature = "webgl"),
+    not(target_arch = "wasm32"),
+    feature = "webgpu"
+))]
+use bevy_render::{renderer::RenderAdapter, DownlevelFlags};
 use bevy_utils::default;
 use core::{hash::Hash, marker::PhantomData, ops::Range};
 #[cfg(feature = "trace")]
@@ -719,6 +725,12 @@ pub fn prepare_lights(
     mut commands: Commands,
     mut texture_cache: ResMut<TextureCache>,
     (render_device, render_queue): (Res<RenderDevice>, Res<RenderQueue>),
+    #[cfg(any(
+        not(feature = "webgl"),
+        not(target_arch = "wasm32"),
+        feature = "webgpu"
+    ))]
+    render_adapter: Res<RenderAdapter>,
     mut global_light_meta: ResMut<GlobalClusterableObjectMeta>,
     mut light_meta: ResMut<LightMeta>,
     views: Query<
@@ -1065,35 +1077,38 @@ pub fn prepare_lights(
         },
     );
 
-    let point_light_depth_texture_view =
-        point_light_depth_texture
-            .texture
-            .create_view(&TextureViewDescriptor {
-                label: Some("point_light_shadow_map_array_texture_view"),
-                format: None,
-                // NOTE: iOS Simulator is missing CubeArray support so we use Cube instead.
-                // See https://github.com/bevyengine/bevy/pull/12052 - remove if support is added.
-                #[cfg(all(
-                    not(target_abi = "sim"),
-                    any(
-                        not(feature = "webgl"),
-                        not(target_arch = "wasm32"),
-                        feature = "webgpu"
-                    )
-                ))]
-                dimension: Some(TextureViewDimension::CubeArray),
-                #[cfg(any(
-                    target_abi = "sim",
-                    all(feature = "webgl", target_arch = "wasm32", not(feature = "webgpu"))
-                ))]
-                dimension: Some(TextureViewDimension::Cube),
-                usage: None,
-                aspect: TextureAspect::DepthOnly,
-                base_mip_level: 0,
-                mip_level_count: None,
-                base_array_layer: 0,
-                array_layer_count: None,
-            });
+    #[cfg(all(feature = "webgl", target_arch = "wasm32", not(feature = "webgpu")))]
+    let supports_cube_array_textures = false;
+
+    #[cfg(any(
+        not(feature = "webgl"),
+        not(target_arch = "wasm32"),
+        feature = "webgpu"
+    ))]
+    let supports_cube_array_textures = render_adapter
+        .get_downlevel_capabilities()
+        .flags
+        .contains(DownlevelFlags::CUBE_ARRAY_TEXTURES);
+
+    let point_light_texture_descriptor = &TextureViewDescriptor {
+        label: Some("point_light_shadow_map_array_texture_view"),
+        format: None,
+        dimension: if supports_cube_array_textures {
+            Some(TextureViewDimension::CubeArray)
+        } else {
+            Some(TextureViewDimension::Cube)
+        },
+        usage: None,
+        aspect: TextureAspect::DepthOnly,
+        base_mip_level: 0,
+        mip_level_count: None,
+        base_array_layer: 0,
+        array_layer_count: None,
+    };
+
+    let point_light_depth_texture_view = point_light_depth_texture
+        .texture
+        .create_view(point_light_texture_descriptor);
 
     let directional_light_depth_texture = texture_cache.get(
         &render_device,
